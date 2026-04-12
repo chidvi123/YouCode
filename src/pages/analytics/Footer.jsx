@@ -34,18 +34,24 @@ export default function Footer() {
                 <span className="footer-brand-name">Coding Tracker</span>
             </div>
 
-            <div className="footer-links">
+            <div className="footer-tooltip-wrapper">
                 <a href="#" className="footer-link" onClick={(e) => e.preventDefault()}>
                     Terms &amp; Conditions
                 </a>
+                <div className="footer-tooltip">
+                    This tool is intended for personal productivity tracking. Accuracy is not guaranteed, and users are responsible for how they use the data.
+                </div>
+                </div>
+
                 <span className="footer-dot">·</span>
+
+                <div className="footer-tooltip-wrapper">
                 <a href="#" className="footer-link" onClick={(e) => e.preventDefault()}>
                     Privacy Policy
                 </a>
-                <span className="footer-dot">·</span>
-                <a href="mailto:127156112@sastra.ac.in" className="footer-link">
-                    Contact Us
-                </a>
+                <div className="footer-tooltip">
+                    All your data is stored locally in your browser. No personal data is collected, shared, or transmitted to any external servers.
+                </div>
             </div>
 
             <div className="footer-socials">
