@@ -1,13 +1,14 @@
-let lastProblemUrl=null;
-
-console.log("Content script loaded");
+let lastProblemUrl = null;
+const DEBUG = false;
+if (DEBUG) console.log("Content script loaded");
 
 /* =========================
    PREVENT MULTIPLE RUNS
 ========================= */
 
 if (window.__DSA_EXTENSION_ACTIVE__) {
-  console.log("Content script already running");
+  if (DEBUG) console.log("Content script already running");
+  throw new Error("Already initiated")
 } else {
   window.__DSA_EXTENSION_ACTIVE__ = true;
 }
@@ -22,12 +23,12 @@ function getCurrentPlatform() {
   const url = window.location.href;
 
   if (url.includes("leetcode.com/problems/")) {
-    console.log("LeetCode problem page detected");
+    if (DEBUG) console.log("LeetCode problem page detected");
     return "leetcode";
   }
 
   if (url.includes("geeksforgeeks.org/problems/")) {
-    console.log("GeeksforGeeks problem page detected");
+    if (DEBUG) console.log("GeeksforGeeks problem page detected");
     return "geeksforgeeks";
   }
 
@@ -99,7 +100,7 @@ function getLeetCodeTopics() {
 
   });
 
-  console.log("Topics:", topics);
+  if (DEBUG) console.log("Topics:", topics);
 
   return topics;
 }
@@ -152,7 +153,7 @@ function getGFGTopics() {
 
   });
 
-  console.log("Topics:", topics);
+  if (DEBUG) console.log("Topics:", topics);
 
   return topics;
 }
@@ -169,12 +170,12 @@ function extractLeetCodeProblemData() {
   const topics = getLeetCodeTopics();
   const url = window.location.href;
 
-  console.log("Problem Title:", title);
-  console.log("Difficulty:", difficulty);
+  if (DEBUG) console.log("Problem Title:", title);
+  if (DEBUG) console.log("Difficulty:", difficulty);
 
   return {
     title,
-    name:title,
+    name: title,
     difficulty,
     topics,
     platform: "leetcode",
@@ -189,12 +190,12 @@ function extractGFGProblemData() {
   const topics = getGFGTopics();
   const url = window.location.href;
 
-  console.log("Problem Title:", title);
-  console.log("Difficulty:", difficulty);
+  if (DEBUG) console.log("Problem Title:", title);
+  if (DEBUG) console.log("Difficulty:", difficulty);
 
   return {
     title,
-    name:title,
+    name: title,
     difficulty,
     topics,
     platform: "geeksforgeeks",
@@ -236,7 +237,7 @@ new MutationObserver(() => {
   if (currentUrl !== lastUrl) {
     lastUrl = currentUrl;
 
-    console.log("🔄 URL changed");
+    if (DEBUG) console.log("🔄 URL changed");
 
     const platform = getCurrentPlatform();
 
@@ -246,7 +247,7 @@ new MutationObserver(() => {
 
         if (problemData && problemData.url !== lastProblemUrl) {
 
-          lastProblemUrl=problemData.url;
+          lastProblemUrl = problemData.url;
 
           chrome.runtime.sendMessage({
             type: "PROBLEM_DETECTED",
@@ -265,9 +266,9 @@ if (platform === "geeksforgeeks") {
 
     const problemData = extractGFGProblemData();
 
-    if (problemData && problemData.url!== lastProblemUrl) {
+    if (problemData && problemData.url !== lastProblemUrl) {
 
-      lastProblemUrl=problemData.url;
+      lastProblemUrl = problemData.url;
 
       chrome.runtime.sendMessage({
         type: "PROBLEM_DETECTED",
@@ -297,7 +298,7 @@ if (platform === "leetcode") {
     );
 
     if (submitButton) {
-      console.log("Submit clicked");
+      if (DEBUG) console.log("Submit clicked");
       submitClicked = true;
     }
 
@@ -319,7 +320,7 @@ if (platform === "leetcode") {
 
       solvedAlready = true;
 
-      console.log("✅ Problem Accepted!");
+      if (DEBUG) console.log("✅ Problem Accepted!");
 
       chrome.runtime.sendMessage({
         type: "PROBLEM_SOLVED"
@@ -360,7 +361,7 @@ if (platform === "geeksforgeeks") {
 
       solvedAlready = true;
 
-      console.log("✅ GFG Problem Solved!");
+      if (DEBUG) console.log("✅ GFG Problem Solved!");
 
       chrome.runtime.sendMessage({
         type: "PROBLEM_SOLVED"

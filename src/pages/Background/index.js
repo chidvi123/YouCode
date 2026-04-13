@@ -1,4 +1,6 @@
-console.log("🔥 Background script loaded");
+const DEBUG=false;
+
+if(DEBUG) console.log("🔥 Background script loaded");
 
 // Idle detection (15 minutes)
 chrome.idle.setDetectionInterval(900);
@@ -17,7 +19,7 @@ chrome.storage.local.get("trackingState", (res) => {
   const state = res?.trackingState;
 
   if (state && state.isTracking) {
-    console.log("♻️ Restoring tracking state");
+    if(DEBUG) console.log("♻️ Restoring tracking state");
 
     isTracking = state.isTracking;
     startTime = state.startTime;
@@ -66,14 +68,14 @@ async function saveProblemTime() {
   const problemTime = Math.floor((Date.now() - problemStartTime) / 1000);
 
   if (problemTime < 10){
-    console.log("Ignored short problem visit");
+    if(DEBUG) console.log("Ignored short problem visit");
 
     currentProblem = null;
     problemStartTime = null;
     return;
   }
 
-  console.log("🧩 Problem session ended:", problemTime);
+  if(DEBUG) console.log("🧩 Problem session ended:", problemTime);
 
   const todayKey = getTodayKey();
 
@@ -121,7 +123,7 @@ function startTracking(tabId, platform) {
     }
   });
 
-  console.log("🟢 Tracking started on", platform);
+  if(DEBUG) console.log("🟢 Tracking started on", platform);
 }
 
 
@@ -134,16 +136,18 @@ async function stopTracking() {
   const duration = Math.floor((endTime - startTime) / 1000);
 
   if(duration < 5){
-    console.log("Ignored short session");
+    if(DEBUG) console.log("Ignored short session");
 
     isTracking = false;
     startTime = null;
     currentTabId = null;
     currentPlatform = null;
+
+    chrome.storage.local.remove("trackingState");
     return;
   }
 
-  console.log("🔴 Tracking stopped 🔴");
+  if(DEBUG) console.log("🔴 Tracking stopped 🔴");
 
   await saveProblemTime();
 
@@ -220,6 +224,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 chrome.idle.onStateChanged.addListener(async (state) => {
   if (state === "idle" || state === "locked") {
     await stopTracking();
+    await chrome.storage.local.remove("trackingState");
   }
 });
 
@@ -280,21 +285,40 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
   if (!state || !state.isTracking) return;
 
-  const [activeTab] = await chrome.tabs.query({
+// restore first
+isTracking = true;
+startTime = state.startTime;
+currentPlatform = state.currentPlatform;
+currentTabId = state.currentTabId;
+
+const [activeTab] = await chrome.tabs.query({
   active: true,
   currentWindow: true
   });
 
-  const platform = getPlatform(activeTab?.url);
-  if (!platform) return;
+if (!activeTab) return;
 
-  isTracking = true;
-  startTime = state.startTime;
-  currentPlatform = state.currentPlatform;
-  currentTabId = state.currentTabId;
+if (activeTab.id !== currentTabId) {
+  await stopTracking();
+  return;
+}
 
-  const now = Date.now();
-  let duration = Math.floor((now - startTime) / 1000);
+const platform = getPlatform(activeTab.url);
+if (!platform || platform !== currentPlatform) {
+  await stopTracking();
+  return;
+}
+const now = Date.now();
+
+// 🔥 Safety: stop zombie sessions after 4 hours
+const sessionAge = now - state.startTime;
+
+if (sessionAge > 4 * 60 * 60 * 1000) {
+  await stopTracking();
+  return;
+}
+
+let duration = Math.floor((now - startTime) / 1000);
 
   // 🔥 FIX: prevent jumps
   duration = Math.min(duration, 8);
@@ -316,7 +340,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
   await chrome.storage.local.set({ [todayKey]: sessions });
 
-  console.log("⏱️ Auto progress saved");
+  if(DEBUG) console.log("⏱️ Auto progress saved");
 
   startTime = now;
 
