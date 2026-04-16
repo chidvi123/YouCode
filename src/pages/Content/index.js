@@ -8,11 +8,15 @@ if (DEBUG) console.log("Content script loaded");
 
 if (window.__DSA_EXTENSION_ACTIVE__) {
   if (DEBUG) console.log("Content script already running");
-  throw new Error("Already initiated")
+  // Silent exit — no thrown error polluting user's console
 } else {
   window.__DSA_EXTENSION_ACTIVE__ = true;
+
+  // Wrap all initialization in else block
+  init();
 }
 
+function init() {
 
 /* =========================
    PLATFORM DETECTION
@@ -64,10 +68,32 @@ function getProblemTitleFromURL() {
 ========================= */
 
 function getLeetCodeDifficulty() {
+  // Target specific difficulty element instead of scanning entire page
+  const selectors = [
+    '[class*="difficulty"]',
+    '[data-difficulty]',
+    '[class*="text-difficulty"]'
+  ];
 
-  const match = document.body.innerText.match(/\b(Easy|Medium|Hard)\b/);
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    if (el) {
+      const match = el.innerText.match(/\b(Easy|Medium|Hard)\b/);
+      if (match) return match[0];
+    }
+  }
 
-  return match ? match[0] : null;
+  // Fallback: check a smaller region (problem header area)
+  const header = document.querySelector('[class*="flexlayout__tab"]') ||
+                 document.querySelector('[class*="description"]') ||
+                 document.querySelector('main');
+
+  if (header) {
+    const match = header.innerText.match(/\b(Easy|Medium|Hard)\b/);
+    return match ? match[0] : null;
+  }
+
+  return null;
 }
 
 function getGFGDifficulty() {
@@ -130,12 +156,7 @@ function getGFGTopics() {
 
   if (!accordion) return topics;
 
-  const dropdownBtn = accordion.querySelector("button");
-
-  if (dropdownBtn) {
-    dropdownBtn.click();
-  }
-
+  // Read existing visible tags without clicking
   const tagElements = accordion.querySelectorAll("a, span");
 
   tagElements.forEach(el => {
@@ -205,6 +226,19 @@ function extractGFGProblemData() {
 
 
 /* =========================
+   DEBOUNCE HELPER
+========================= */
+
+function debounce(fn, delay) {
+  let timer;
+  return function (...args) {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), delay);
+  };
+}
+
+
+/* =========================
    SEND PROBLEM DETECTED
 ========================= */
 
@@ -229,9 +263,10 @@ if (platform === "leetcode") {
   }, 3000);
 }
 
+// 🔥 SPA NAVIGATION DETECTION (debounced MutationObserver)
 let lastUrl = location.href;
 
-new MutationObserver(() => {
+const handleDomChange = debounce(() => {
   const currentUrl = location.href;
 
   if (currentUrl !== lastUrl) {
@@ -239,9 +274,9 @@ new MutationObserver(() => {
 
     if (DEBUG) console.log("🔄 URL changed");
 
-    const platform = getCurrentPlatform();
+    const plat = getCurrentPlatform();
 
-    if (platform === "leetcode") {
+    if (plat === "leetcode") {
       setTimeout(() => {
         const problemData = extractLeetCodeProblemData();
 
@@ -257,7 +292,12 @@ new MutationObserver(() => {
       }, 2000);
     }
   }
-}).observe(document.body, { subtree: true, childList: true });
+}, 300);
+
+new MutationObserver(handleDomChange).observe(document.body, {
+  subtree: true,
+  childList: true
+});
 
 
 if (platform === "geeksforgeeks") {
@@ -294,7 +334,7 @@ if (platform === "leetcode") {
   document.addEventListener("click", (e) => {
 
     const submitButton = e.target.closest(
-      'button[data-e2e-locator="console-submit-button"]'
+      'button[data-e2e-locator="console-submit-button"], button[class*="submit"]'
     );
 
     if (submitButton) {
@@ -310,7 +350,7 @@ if (platform === "leetcode") {
 
     const resultElement = document.querySelector(
       '[data-e2e-locator="submission-result"]'
-    );
+    ) || document.querySelector('[class*="submission-result"]');
 
     if (!resultElement) return;
 
@@ -377,3 +417,5 @@ if (platform === "geeksforgeeks") {
   });
 
 }
+
+} // end init()

@@ -7,16 +7,24 @@ export function formatTime(seconds) {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
-// Return heat intensity level 0–4 from seconds
+// Get local date key (not UTC) — matches background script format
+export function getLocalDateKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+// Return heat intensity level 0–4 from count
 export function getHeatLevel(count) {
-  if (count==0) return 0;
-  if (count<=2) return 1;
-  if (count<=4) return 2;
-  if (count<=6) return 3;
+  if (count === 0) return 0;
+  if (count <= 2) return 1;
+  if (count <= 4) return 2;
+  if (count <= 6) return 3;
   return 4;
 }
 
-// Build array of { date, time } for the past `days` days
+// Build array of { date, count } for the past `days` days
 export function buildDayArray(data, days) {
   const today = new Date();
 
@@ -24,10 +32,10 @@ export function buildDayArray(data, days) {
     const d = new Date(today);
     d.setDate(today.getDate() - (days - 1 - i));
 
-    const key = d.toISOString().split("T")[0];
+    const key = getLocalDateKey(d);
     const sessions = data[key] || [];
-    
-    const count=sessions.filter((r)=> r.type =="problem" && r.solved).length;
+
+    const count = sessions.filter((r) => r.type === "problem" && r.solved).length;
     return { date: key, count };
   });
 }

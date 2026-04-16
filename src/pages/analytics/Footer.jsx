@@ -41,11 +41,11 @@ export default function Footer() {
                 <div className="footer-tooltip">
                     This tool is intended for personal productivity tracking. Accuracy is not guaranteed, and users are responsible for how they use the data.
                 </div>
-                </div>
+            </div>
 
-                <span className="footer-dot">·</span>
+            <span className="footer-dot">·</span>
 
-                <div className="footer-tooltip-wrapper">
+            <div className="footer-tooltip-wrapper">
                 <a href="#" className="footer-link" onClick={(e) => e.preventDefault()}>
                     Privacy Policy
                 </a>
@@ -55,17 +55,8 @@ export default function Footer() {
             </div>
 
             <div className="footer-socials">
-                <a href="https://wa.me/" target="_blank" rel="noreferrer" className="footer-social-btn" title="WhatsApp">
-                    <WhatsAppIcon />
-                </a>
-                <a href="https://instagram.com/" target="_blank" rel="noreferrer" className="footer-social-btn" title="Instagram">
-                    <InstagramIcon />
-                </a>
                 <a href="https://github.com/chidvi123" target="_blank" rel="noreferrer" className="footer-social-btn" title="GitHub">
                     <GitHubIcon />
-                </a>
-                <a href="https://linkedin.com/" target="_blank" rel="noreferrer" className="footer-social-btn" title="LinkedIn">
-                    <LinkedInIcon />
                 </a>
             </div>
 
@@ -74,7 +65,7 @@ export default function Footer() {
             </span>
 
             <span className="footer-love">
-                Made with <span className="footer-heart">&#9829;</span> by C &amp; J
+                Made by C &amp; J
             </span>
 
         </footer>
