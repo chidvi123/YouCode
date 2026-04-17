@@ -13,6 +13,9 @@ let currentPlatform = null;
 let currentProblem = null;
 let problemStartTime = null;
 
+let lastSolvedProblem = null;
+let lastSolvedTime = 0;
+
 
 // 🔽 RESTORE STATE
 chrome.storage.local.get("trackingState", (res) => {
@@ -64,8 +67,8 @@ function getPlatform(url) {
 
 
 // 🔹 Save problem time
-async function saveProblemTime() {
-
+async function saveProblemTime(platformContext = currentPlatform) {
+  await ensureProblemState();
   if (!currentProblem || !problemStartTime) return;
 
   const problemTime = Math.floor((Date.now() - problemStartTime) / 1000);
@@ -87,7 +90,7 @@ async function saveProblemTime() {
 
   sessions.push({
     type: "problem",
-    platform: currentPlatform,
+    platform: platformContext,
     problem: currentProblem,
     timeSpent: problemTime,
     solved: currentProblem?.solved || false,
@@ -102,6 +105,7 @@ async function saveProblemTime() {
 
   currentProblem = null;
   problemStartTime = null;
+  await chrome.storage.local.remove("problemState");
 }
 
 
@@ -135,46 +139,65 @@ async function stopTracking() {
 
   if (!isTracking) return;
 
+  // Capture synchronously to prevent race conditions during await
+  const _startTime = startTime;
+  const _currentPlatform = currentPlatform;
+  const _currentTabId = currentTabId;
+
+  // Immediately clear state locks
+  isTracking = false;
+  startTime = null;
+  currentTabId = null;
+  currentPlatform = null;
+
   const endTime = Date.now();
-  const duration = Math.floor((endTime - startTime) / 1000);
+  const duration = Math.floor((endTime - _startTime) / 1000);
 
   if (duration < 5) {
     if (DEBUG) console.log("Ignored short session");
-
-    isTracking = false;
-    startTime = null;
-    currentTabId = null;
-    currentPlatform = null;
-
     chrome.storage.local.remove("trackingState");
     return;
   }
 
   if (DEBUG) console.log("🔴 Tracking stopped 🔴");
 
-  await saveProblemTime();
+  await saveProblemTime(_currentPlatform);
+
+  // If the tracker was asleep/suspended for over 10 minutes, completely discard the massive gap!
+  if (duration > 600) {
+    if (DEBUG) console.log("Discarded massive suspended/sleep gap in stopTracking:", duration);
+    chrome.storage.local.remove("trackingState");
+    return;
+  }
 
   const todayKey = getTodayKey();
 
   const result = await chrome.storage.local.get(todayKey);
   const sessions = result[todayKey] || [];
 
-  sessions.push({
-    type: "platform",
-    platform: currentPlatform,
-    start: startTime,
-    end: endTime,
-    duration: duration
-  });
+  const lastPlatformSession = sessions.slice().reverse().find(s => s.type === "platform");
+
+  // Merge contiguous sessions (gap < 10 seconds)
+  if (
+    lastPlatformSession &&
+    lastPlatformSession.platform === _currentPlatform &&
+    _startTime - lastPlatformSession.end < 10000
+  ) {
+    lastPlatformSession.end = endTime;
+    lastPlatformSession.duration += duration;
+  } else {
+    sessions.push({
+      type: "platform",
+      platform: _currentPlatform,
+      start: _startTime,
+      end: endTime,
+      duration: duration
+    });
+  }
 
   await chrome.storage.local.set({ [todayKey]: sessions });
 
   notifyDataUpdated();
-
-  isTracking = false;
-  startTime = null;
-  currentTabId = null;
-  currentPlatform = null;
 
   chrome.storage.local.remove("trackingState");
 }
@@ -240,8 +263,31 @@ chrome.idle.onStateChanged.addListener(async (state) => {
 
 
 // 🔹 Content script messages (proper async handling with return true)
+
+async function ensureProblemState() {
+  if (currentProblem) return;
+  const res = await chrome.storage.local.get("problemState");
+  if (res.problemState) {
+    currentProblem = res.problemState.currentProblem;
+    problemStartTime = res.problemState.problemStartTime;
+  }
+}
+
 async function handleMessage(message) {
   if (message.type === "PROBLEM_DETECTED") {
+    await ensureProblemState();
+
+    // Ignore duplicate navigations within the exact same problem (e.g. visiting /submissions tab)
+    if (currentProblem && currentProblem.name === message.data.name && currentProblem.platform === message.data.platform) {
+      if (DEBUG) console.log("Skipped duplicate problem detection for:", message.data.name);
+      return;
+    }
+
+    // Ignore ghost detections arriving slightly after the problem was successfully cleared out by a SOLVE
+    if (lastSolvedProblem === message.data.name && (Date.now() - lastSolvedTime) < 15000) {
+      if (DEBUG) console.log("Skipped ghost tracking after recent solve");
+      return;
+    }
 
     if (currentProblem && problemStartTime) {
       await saveProblemTime();
@@ -253,12 +299,16 @@ async function handleMessage(message) {
     };
 
     problemStartTime = Date.now();
+    await chrome.storage.local.set({ problemState: { currentProblem, problemStartTime } });
   }
 
   if (message.type === "PROBLEM_SOLVED") {
+    await ensureProblemState();
 
     if (currentProblem && problemStartTime) {
       currentProblem.solved = true;
+      lastSolvedProblem = currentProblem.name;
+      lastSolvedTime = Date.now();
     }
 
     await saveProblemTime();
@@ -377,27 +427,50 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
   let duration = Math.floor((now - startTime) / 1000);
 
-  // Cap to slightly above alarm interval (30s) to prevent jumps
-  duration = Math.min(duration, 35);
+  // Note: we removed the artificial 35-second clamp because Chrome MV3 
+  // intentionally throttles background alarms to >60 seconds on laptops, 
+  // which was artificially starving accurate duration counting.
 
   if (duration < 2) return;
+
+  // Protect against massive suspended sleep gaps (e.g. laptop lid closed overnight)
+  if (duration > 600) {
+    if (DEBUG) console.log("Massive sleep gap detected in alarm, resetting start time...");
+    startTime = now;
+    chrome.storage.local.set({
+      trackingState: { isTracking: true, startTime, currentPlatform, currentTabId }
+    });
+    return; // Completely ignore the sleep duration
+  }
 
   const todayKey = getTodayKey();
 
   const result = await chrome.storage.local.get(todayKey);
   const sessions = result[todayKey] || [];
 
-  sessions.push({
-    type: "platform",
-    platform: currentPlatform,
-    start: startTime,
-    end: now,
-    duration: duration,
-  });
+  const lastPlatformSession = sessions.slice().reverse().find(s => s.type === "platform");
+
+  // Merge contiguous sessions directly (gap < 10 seconds)
+  if (
+    lastPlatformSession &&
+    lastPlatformSession.platform === currentPlatform &&
+    startTime - lastPlatformSession.end < 10000
+  ) {
+    lastPlatformSession.end = now;
+    lastPlatformSession.duration += duration;
+  } else {
+    sessions.push({
+      type: "platform",
+      platform: currentPlatform,
+      start: startTime,
+      end: now,
+      duration: duration,
+    });
+  }
 
   await chrome.storage.local.set({ [todayKey]: sessions });
 
-  if (DEBUG) console.log("⏱️ Auto progress saved");
+  if (DEBUG) console.log("⏱️ Auto progress saved/merged");
 
   startTime = now;
 

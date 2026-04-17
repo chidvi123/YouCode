@@ -1,4 +1,7 @@
 let lastProblemUrl = null;
+let solvedAlready = false;
+let lastSubmitTime = 0;
+
 const DEBUG = false;
 if (DEBUG) console.log("Content script loaded");
 
@@ -8,15 +11,11 @@ if (DEBUG) console.log("Content script loaded");
 
 if (window.__DSA_EXTENSION_ACTIVE__) {
   if (DEBUG) console.log("Content script already running");
-  // Silent exit — no thrown error polluting user's console
+  // Silently exist instead of throwing Error to prevent console spam
 } else {
   window.__DSA_EXTENSION_ACTIVE__ = true;
-
-  // Wrap all initialization in else block
-  init();
 }
 
-function init() {
 
 /* =========================
    PLATFORM DETECTION
@@ -68,32 +67,10 @@ function getProblemTitleFromURL() {
 ========================= */
 
 function getLeetCodeDifficulty() {
-  // Target specific difficulty element instead of scanning entire page
-  const selectors = [
-    '[class*="difficulty"]',
-    '[data-difficulty]',
-    '[class*="text-difficulty"]'
-  ];
 
-  for (const sel of selectors) {
-    const el = document.querySelector(sel);
-    if (el) {
-      const match = el.innerText.match(/\b(Easy|Medium|Hard)\b/);
-      if (match) return match[0];
-    }
-  }
+  const match = document.body.innerText.match(/\b(Easy|Medium|Hard)\b/);
 
-  // Fallback: check a smaller region (problem header area)
-  const header = document.querySelector('[class*="flexlayout__tab"]') ||
-                 document.querySelector('[class*="description"]') ||
-                 document.querySelector('main');
-
-  if (header) {
-    const match = header.innerText.match(/\b(Easy|Medium|Hard)\b/);
-    return match ? match[0] : null;
-  }
-
-  return null;
+  return match ? match[0] : null;
 }
 
 function getGFGDifficulty() {
@@ -156,7 +133,12 @@ function getGFGTopics() {
 
   if (!accordion) return topics;
 
-  // Read existing visible tags without clicking
+  const dropdownBtn = accordion.querySelector("button");
+
+  if (dropdownBtn) {
+    dropdownBtn.click();
+  }
+
   const tagElements = accordion.querySelectorAll("a, span");
 
   tagElements.forEach(el => {
@@ -226,19 +208,6 @@ function extractGFGProblemData() {
 
 
 /* =========================
-   DEBOUNCE HELPER
-========================= */
-
-function debounce(fn, delay) {
-  let timer;
-  return function (...args) {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn.apply(this, args), delay);
-  };
-}
-
-
-/* =========================
    SEND PROBLEM DETECTED
 ========================= */
 
@@ -263,20 +232,20 @@ if (platform === "leetcode") {
   }, 3000);
 }
 
-// 🔥 SPA NAVIGATION DETECTION (debounced MutationObserver)
 let lastUrl = location.href;
 
-const handleDomChange = debounce(() => {
+new MutationObserver(() => {
   const currentUrl = location.href;
 
   if (currentUrl !== lastUrl) {
     lastUrl = currentUrl;
+    solvedAlready = false;
 
-    if (DEBUG) console.log("🔄 URL changed");
+    if (DEBUG) console.log("🔄 URL changed within SPA");
 
-    const plat = getCurrentPlatform();
+    const platform = getCurrentPlatform();
 
-    if (plat === "leetcode") {
+    if (platform === "leetcode") {
       setTimeout(() => {
         const problemData = extractLeetCodeProblemData();
 
@@ -292,12 +261,7 @@ const handleDomChange = debounce(() => {
       }, 2000);
     }
   }
-}, 300);
-
-new MutationObserver(handleDomChange).observe(document.body, {
-  subtree: true,
-  childList: true
-});
+}).observe(document.body, { subtree: true, childList: true });
 
 
 if (platform === "geeksforgeeks") {
@@ -321,6 +285,23 @@ if (platform === "geeksforgeeks") {
 
 }
 
+// 🔹 Restore Problem State on Tab Focus
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    if (platform === "leetcode") {
+      const problemData = extractLeetCodeProblemData();
+      if (problemData && problemData.name) {
+        chrome.runtime.sendMessage({ type: "PROBLEM_DETECTED", data: problemData });
+      }
+    } else if (platform === "geeksforgeeks") {
+      const problemData = extractGFGProblemData();
+      if (problemData && problemData.name) {
+        chrome.runtime.sendMessage({ type: "PROBLEM_DETECTED", data: problemData });
+      }
+    }
+  }
+});
+
 
 /* =========================
    SOLVED DETECTION (LEETCODE)
@@ -328,18 +309,15 @@ if (platform === "geeksforgeeks") {
 
 if (platform === "leetcode") {
 
-  let solvedAlready = false;
-  let submitClicked = false;
-
   document.addEventListener("click", (e) => {
 
     const submitButton = e.target.closest(
-      'button[data-e2e-locator="console-submit-button"], button[class*="submit"]'
+      'button[data-e2e-locator="console-submit-button"]'
     );
 
     if (submitButton) {
       if (DEBUG) console.log("Submit clicked");
-      submitClicked = true;
+      lastSubmitTime = Date.now();
     }
 
   });
@@ -350,13 +328,16 @@ if (platform === "leetcode") {
 
     const resultElement = document.querySelector(
       '[data-e2e-locator="submission-result"]'
-    ) || document.querySelector('[class*="submission-result"]');
+    );
 
     if (!resultElement) return;
 
     const resultText = resultElement.innerText.toLowerCase();
 
-    if (submitClicked && resultText.includes("accepted")) {
+    // Check if submit was clicked within the last 60 seconds
+    const isRecentSubmit = (Date.now() - lastSubmitTime) < 60000;
+
+    if (isRecentSubmit && resultText.includes("accepted")) {
 
       solvedAlready = true;
 
@@ -366,7 +347,7 @@ if (platform === "leetcode") {
         type: "PROBLEM_SOLVED"
       });
 
-      submitClicked = false;
+      lastSubmitTime = 0;
 
     }
 
@@ -385,8 +366,6 @@ if (platform === "leetcode") {
 ========================= */
 
 if (platform === "geeksforgeeks") {
-
-  let solvedAlready = false;
 
   const solvedObserver = new MutationObserver(() => {
 
@@ -417,5 +396,3 @@ if (platform === "geeksforgeeks") {
   });
 
 }
-
-} // end init()
